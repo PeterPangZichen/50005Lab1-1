@@ -56,6 +56,7 @@ void setup(){
     //          f. Create number_of_processes semaphores of value 0 each to protect each job struct in the shared memory. Store the returned pointer by sem_open in sem_jobs_buffer[i]
     //          g. Return to main
 
+    //TODO a
     ShmID_global_data = shmget(IPC_PRIVATE, sizeof(global_data), IPC_CREAT | 0666);
     if (ShmID_global_data == -1){
         printf("Global data shared memory creation failed\n");
@@ -67,10 +68,72 @@ void setup(){
         exit(EXIT_FAILURE);
     }
 
+    //TODO b
     //set global data min and max
     ShmPTR_global_data->max = -1;
     ShmPTR_global_data->min = INT_MAX;
     
+    //TODO c
+
+    //sem_open(name, O_CREAT | O_EXCL, 0644, init value)
+    //If duplicated, return SEM_FAILED. Otherwise, return semaphore pointer.
+    sem_global_data = sem_open("semglobaldata", O_CREAT | O_EXCL, 0644, 1);
+    
+    //Check failed
+    while(true){
+        if (sem_global_data == SEM_FAILED) {
+            //unlink
+            sem_unlink("semglobaldata");
+            //reopen
+            sem_global_data = sem_open("semglobaldata", O_CREAT | O_EXCL, 0644, 1);
+        }
+        else {
+            break;
+        } 
+    }
+    /*while(sem_global_data == SEM_FAILED){
+        //unlink
+        sem_unlink("semglobaldata");
+        //reopen
+        sem_global_data = sem_open("semglobaldata", O_CREAT | O_EXCL, 0644, 1);
+    }*/
+
+    //TODO d
+    ShmID_jobs = shmget(IPC_PRIVATE, number_of_processes*sizeof(job), IPC_CREAT | 0666);
+    if (ShmID_jobs == -1){
+        printf("Job shared memory creation failed\n");
+        exit(EXIT_FAILURE);
+    }
+    shmPTR_jobs_buffer = (job *) shmat(ShmID_jobs, NULL, 0);
+    if ((int) shmPTR_jobs_buffer == -1){
+        printf("Attachment of job shared memory failed \n");
+        exit(EXIT_FAILURE);
+    }
+
+    //TODO e
+    //Setup
+    char sem_name[20];
+    for (int i=0;i<number_of_processes;i++){
+        shmPTR_jobs_buffer[i].task_type = 'z';
+        shmPTR_jobs_buffer[i].task_duration = 0;
+        shmPTR_jobs_buffer[i].task_status = 0;
+        sprintf(sem_name, "job%d", i);
+
+        //TODO f
+        sem_jobs_buffer[i] = sem_open(sem_name, O_CREAT | O_EXCL, 0644, 0);
+        while (true) {
+            if (sem_jobs_buffer[i] == SEM_FAILED) {
+                sem_unlink(sem_name);
+                // try to open again
+                sem_jobs_buffer[i] = sem_open(sem_name, O_CREAT | O_EXCL, 0644, 0);
+            }
+            else {
+                break;
+            }
+        }
+    }
+
+
     return;
 
 }
@@ -85,7 +148,15 @@ void createchildren(){
     //          c. For child process, invoke the method job_dispatch(i)
     //          d. For the parent process, continue creating the next children
     //          e. After number_of_processes children are created, return to main 
-
+    for (int i=0; i<number_of_processes; i++) {
+        //create a new child
+        children_processes[i] = fork();
+        //check whether a child or parent
+        if (children_processes[i] == 0) {
+            job_dispatch(i);
+            //exit(0);
+        }
+    }
     return;
 }
 
