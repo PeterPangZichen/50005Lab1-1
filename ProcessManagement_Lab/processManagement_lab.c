@@ -7,6 +7,7 @@
 void task(long duration)
 {
     // simulate computation for x number of seconds
+    printf("task start\n");
     usleep(duration*TIME_MULTIPLIER);
 
     // TODO: protect the access of shared variable below
@@ -26,6 +27,7 @@ void task(long duration)
     }
     //post
     sem_post(sem_global_data);
+    printf("task done\n");
 }
 
 
@@ -50,19 +52,24 @@ void job_dispatch(int i){
             exit(1);
         }
         else{
+            printf("Do job\n");
             //task
             if(shmPTR_jobs_buffer[i].task_type=='t'){
                 task(shmPTR_jobs_buffer[i].task_duration);
+                shmPTR_jobs_buffer[i].task_status = 0;
             }
             //wait
             else if(shmPTR_jobs_buffer[i].task_type=='w'){
                 usleep(shmPTR_jobs_buffer[i].task_duration);
+                shmPTR_jobs_buffer[i].task_status = 0;
             }
             //exit
             else if(shmPTR_jobs_buffer[i].task_type=='z'){
+                shmPTR_jobs_buffer[i].task_status = 0;
                 exit(3);
             }
             else{
+                printf("illegal");
                 kill(getpid(),SIGKILL);
             }
         }
@@ -186,8 +193,8 @@ void createchildren(){
         children_processes[i] = fork();
         //check whether a child or parent
         if (children_processes[i] == 0) {
+            printf("Children start to do job");
             job_dispatch(i);
-            //exit(0);
         }
     }
     return;
@@ -196,13 +203,13 @@ void createchildren(){
 /**
  * The function where the main process loops and busy wait to dispatch job in available slots
  * */
-void main_loop(char* fileName){
+/*void main_loop(char* fileName){
 
     // load jobs and add them to the shared memory
     FILE* opened_file = fopen(fileName, "r");
     char action; //stores whether its a 'p' or 'w'
-    long num; //stores the argument of the job 
-
+    long num; //stores the argument of the job
+    
     while (fscanf(opened_file, "%c %ld\n", &action, &num) == 2) { //while the file still has input
 
         //TODO#4: create job, busy wait
@@ -216,9 +223,15 @@ void main_loop(char* fileName){
         //go through all process in buffer
         //should not use "for" since need to wait
         //for(int i=0;i<number_of_processes;i++)
+        printf("Enter the loop\n");
+        printf("Test, char is %c, num is %ld\n", action, num);
+
         while(true){
             //check alive
+            printf("Check process %d\n", i);
+            printf("Process %d status:%d\n", i, shmPTR_jobs_buffer[i].task_status);
             int alive = waitpid(children_processes[i], NULL, WNOHANG);
+            printf("Process %d alive:%d\n", i, alive);
             if (alive == 0){
                 //check free
                 if (shmPTR_jobs_buffer[i].task_status == 0) {
@@ -228,9 +241,11 @@ void main_loop(char* fileName){
                     shmPTR_jobs_buffer[i].task_status = 1;
 
                     sem_post(sem_jobs_buffer[i]);
+                    i = (i+1) % number_of_processes;
                     break;
+                }else{
+                    i = (i+1) % number_of_processes;
                 }
-                i = (i+1) % number_of_processes;
             }
             //if not alive, revive
             else{
@@ -244,6 +259,8 @@ void main_loop(char* fileName){
             }
         }
     }
+    
+    printf("End the loop\n");
     fclose(opened_file);
 
     printf("Main process is going to send termination signals\n");
@@ -265,6 +282,108 @@ void main_loop(char* fileName){
   
 
 
+    //wait for all children processes to properly execute the 'z' termination jobs
+    int process_waited_final = 0;
+    pid_t wpid;
+    while ((wpid = wait(NULL)) > 0){
+        process_waited_final ++;
+    }
+    
+    // print final results
+    printf("Final results: sum -- %ld, odd -- %ld, min -- %ld, max -- %ld, total task -- %ld\n", ShmPTR_global_data->sum_work, ShmPTR_global_data->odd, ShmPTR_global_data->min, ShmPTR_global_data->max, ShmPTR_global_data->total_tasks);
+}*/
+void main_loop(char* fileName){
+
+    // load jobs and add them to the shared memory
+    FILE* opened_file = fopen(fileName, "r");
+    char action; //stores whether its a 'p' or 'w'
+    long num; //stores the argument of the job
+    int i = 0;
+    int idle = 0;
+    int j, status;
+
+    while (fscanf(opened_file, "%c %ld\n", &action, &num) == 2) { //while the file still has input
+
+        //TODO#4: create job, busy wait
+        //      a. Busy wait and examine each shmPTR_jobs_buffer[i] for jobs that are done by checking that shmPTR_jobs_buffer[i].task_status == 0. You also need to ensure that the process i IS alive using waitpid(children_processes[i], NULL, WNOHANG). This WNOHANG option will not cause main process to block when the child is still alive. waitpid will return 0 if the child is still alive.
+        //      b. If both conditions in (a) is satisfied update the contents of shmPTR_jobs_buffer[i], and increase the semaphore using sem_post(sem_jobs_buffer[i])
+        //      c. Break of busy wait loop, advance to the next task on file
+        //      d. Otherwise if process i is prematurely terminated, revive it. You are free to design any mechanism you want. The easiest way is to always spawn a new process using fork(), direct the children to job_dispatch(i) function. Then, update the shmPTR_jobs_buffer[i] for this process. Afterwards, don't forget to do sem_post as well
+        //      e. The outermost while loop will keep doing this until there's no more content in the input file.
+        
+        while (true) {
+            // if child process i is alive
+            if (waitpid(children_processes[i], &status, WNOHANG) == 0) {
+                // if child process i is ready to receive a new job
+                if (shmPTR_jobs_buffer[i].task_status == 0) {
+                    shmPTR_jobs_buffer[i].task_type = action;
+                    shmPTR_jobs_buffer[i].task_duration = num;
+                    shmPTR_jobs_buffer[i].task_status = 1;
+                    sem_post(sem_jobs_buffer[i]);
+                    i = (i+1) % number_of_processes;
+                    break;
+                }
+                // (child process i not ready) check next child process
+                else {
+                    i = (i+1) % number_of_processes;
+                    continue;
+                }
+            }
+            // child process i is not alive
+            else {
+                // check for idle child processes
+                j = (i+1) % number_of_processes;
+                while (j != i) {
+                    if (waitpid(children_processes[j], NULL, WNOHANG) == 0 &&
+                        shmPTR_jobs_buffer[j].task_status == 0) {
+                        idle = 1;
+                        break;
+                    }
+                    j = (j+1) % number_of_processes;
+                }
+                // if there are idle processes, reset idle flag and check next child
+                if (idle == 1) {
+                    idle = 0;
+                    i = (i+1) % number_of_processes;
+                }
+                // otherwise, spawn and dispatch new child process
+                else {
+                    children_processes[i] = fork();
+                    if (children_processes[i] == 0) {
+                        job_dispatch(i);
+                        exit(3);
+                    }
+                    // child process successfully created
+                    else if (children_processes[i] > 0) {
+                        // reset task_status
+                        shmPTR_jobs_buffer[i].task_status = 0;
+                    }
+                }
+            }
+        }
+    }
+    fclose(opened_file);
+
+    //printf("Main process is going to send termination signals\n");
+
+    // TODO#4: Design a way to send termination jobs to ALL worker that are currently alive
+    for (i=0; i<number_of_processes; i++) {
+        // if child process still alive
+        if (waitpid(children_processes[i], &status, WNOHANG) == 0) {
+            // if the child is busy
+            if (shmPTR_jobs_buffer[i].task_status == 1 &&
+                shmPTR_jobs_buffer[i].task_type != 'i') {
+                // busy wait for the child
+                while (shmPTR_jobs_buffer[i].task_status == 1);
+            }
+            // send 'z0' signal and post job
+            shmPTR_jobs_buffer[i].task_type = 'z';
+            shmPTR_jobs_buffer[i].task_duration = 0;
+            shmPTR_jobs_buffer[i].task_status = 1;
+            sem_post(sem_jobs_buffer[i]);
+        }
+    }
+    
     //wait for all children processes to properly execute the 'z' termination jobs
     int process_waited_final = 0;
     pid_t wpid;
@@ -319,6 +438,8 @@ void cleanup(){
 }
 
 
+
+
 // Real main
 int main(int argc, char* argv[]){
 
@@ -349,6 +470,8 @@ int main(int argc, char* argv[]){
 
     setup();
     createchildren();
+    printf("setup and create done\n");
+    
     main_loop(argv[1]);
 
     //parent cleanup
