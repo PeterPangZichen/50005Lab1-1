@@ -35,6 +35,8 @@ void job_dispatch(int i){
     //          c. If there's new job, execute the job accordingly: either by calling task(), usleep, exit(3) or kill(getpid(), SIGKILL)
     //          d. Loop back to check for new job 
 
+    //TODO a
+
 
     printf("Hello from child %d with pid %d and parent id %d\n", i, getpid(), getppid());
     exit(0); 
