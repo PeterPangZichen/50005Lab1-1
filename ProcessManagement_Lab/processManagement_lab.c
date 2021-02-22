@@ -11,6 +11,8 @@ void task(long duration)
 
     // TODO: protect the access of shared variable below
     // update global variables to simulate statistics
+    //wait
+    sem_wait(sem_global_data);
     ShmPTR_global_data->sum_work += duration;
     ShmPTR_global_data->total_tasks ++;
     if (duration % 2 == 1) {
@@ -22,6 +24,8 @@ void task(long duration)
     if (duration > ShmPTR_global_data->max) {
         ShmPTR_global_data->max = duration;
     }
+    //post
+    sem_post(sem_global_data);
 }
 
 
@@ -35,11 +39,37 @@ void job_dispatch(int i){
     //          c. If there's new job, execute the job accordingly: either by calling task(), usleep, exit(3) or kill(getpid(), SIGKILL)
     //          d. Loop back to check for new job 
 
-    //TODO a
+    //job: shmPTR_jobs_buffer[i]
 
+    while(true){
+        //check job status
+        if(shmPTR_jobs_buffer[i].task_status==0){
+            sem_wait(sem_jobs_buffer[i]);
+        }
+        else if(shmPTR_jobs_buffer[i].task_status==-1){
+            exit(1);
+        }
+        else{
+            //task
+            if(shmPTR_jobs_buffer[i].task_type=='t'){
+                task(shmPTR_jobs_buffer[i].task_duration);
+            }
+            //wait
+            else if(shmPTR_jobs_buffer[i].task_type=='w'){
+                usleep(shmPTR_jobs_buffer[i].task_duration);
+            }
+            //exit
+            else if(shmPTR_jobs_buffer[i].task_type=='z'){
+                exit(3);
+            }
+            else{
+                kill(getpid(),SIGKILL);
+            }
+        }
+    }
 
-    printf("Hello from child %d with pid %d and parent id %d\n", i, getpid(), getppid());
-    exit(0); 
+    //printf("Hello from child %d with pid %d and parent id %d\n", i, getpid(), getppid());
+    //exit(0); 
 
 }
 
