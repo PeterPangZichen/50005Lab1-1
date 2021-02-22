@@ -145,7 +145,7 @@ void setup(){
     //TODO e
     //Setup
     for (int i=0;i<number_of_processes;i++){
-        shmPTR_jobs_buffer[i].task_type = 'z';
+        shmPTR_jobs_buffer[i].task_type = 'w';
         shmPTR_jobs_buffer[i].task_duration = 0;
         shmPTR_jobs_buffer[i].task_status = 0;
         
@@ -212,8 +212,37 @@ void main_loop(char* fileName){
         //      d. Otherwise if process i is prematurely terminated, revive it. You are free to design any mechanism you want. The easiest way is to always spawn a new process using fork(), direct the children to job_dispatch(i) function. Then, update the shmPTR_jobs_buffer[i] for this process. Afterwards, don't forget to do sem_post as well 
         //      e. The outermost while loop will keep doing this until there's no more content in the input file. 
 
+        int alive = waitpid(children_processes[i], NULL, WNOHANG);
+        int i = 0;
+        //go through all process in buffer
+        //should not use "for" since need to wait
+        //for(int i=0;i<number_of_processes;i++)
+        while(true){
+            //check alive
+            if (alive == 0){
+                //check free
+                if (shmPTR_jobs_buffer[i].task_status == 0) {
+                    //do job
+                    shmPTR_jobs_buffer[i].task_type = action;
+                    shmPTR_jobs_buffer[i].task_duration = num;
+                    shmPTR_jobs_buffer[i].task_status = 1;
 
-
+                    sem_post(sem_jobs_buffer[i]);
+                    break;
+                }
+                i = (i+1) % number_of_processes;
+            }
+            //if not alive, revive
+            else{
+                //create a new child
+                children_processes[i] = fork();
+                //check whether a child or parent
+                if (children_processes[i] == 0) {
+                    job_dispatch(i);
+                    //exit(0);
+                }
+            }
+        }
     }
     fclose(opened_file);
 
@@ -221,6 +250,20 @@ void main_loop(char* fileName){
 
     // TODO#4: Design a way to send termination jobs to ALL worker that are currently alive 
 
+        for (i=0; i<number_of_processes; i++) {
+            if (shmPTR_jobs_buffer[i].task_status == 1 && shmPTR_jobs_buffer[i].task_type != 'i') {
+                //busy wait
+                while (shmPTR_jobs_buffer[i].task_status == 1);
+            }
+            //job done
+            //send termination signal
+            shmPTR_jobs_buffer[i].task_type = 'z';
+            shmPTR_jobs_buffer[i].task_duration = 0;
+            shmPTR_jobs_buffer[i].task_status = 1;
+            sem_post(sem_jobs_buffer[i]);
+        }
+    }
+  
 
 
     //wait for all children processes to properly execute the 'z' termination jobs
@@ -239,59 +282,6 @@ void cleanup(){
     // 1. Detach both shared memory (global_data and jobs)
     // 2. Delete both shared memory (global_data and jobs)
     // 3. Unlink all semaphores in sem_jobs_buffer
-}
-
-// Real main
-int main(int argc, char* argv[]){
-
-    //Check and parse command line options to be in the right format
-    if (argc < 2) {
-        printf("Usage: sum <infile> <numprocs>\n");
-        exit(EXIT_FAILURE);
-    }
-
-    //Limit number_of_processes into 10.
-    //If there's no third argument, set the default number_of_processes into 1.
-    if (argc < 3){
-        number_of_processes = 1;
-    }
-    else{
-        if (atoi(argv[2]) < MAX_PROCESS) number_of_processes = atoi(argv[2]);
-        else number_of_processes = MAX_PROCESS;
-    }
-
-    printf("Number of processes: %d\n", number_of_processes);
-
-    setup();
-
-    //test fill the shared memory with something
-    for (int i = 0; i<number_of_processes; i++){
-        printf("Parent write job %d with duration %d, status %d \n", i, i*2, 0);
-        shmPTR_jobs_buffer[i].task_duration = i*2;
-        shmPTR_jobs_buffer[i].task_status = 0; //from parent
-    }
-
-    pid_t pid_test = fork();
-
-    if (pid_test == 0){
-        //child print
-        for (int i = 0; i<number_of_processes; i++){
-            printf("Child receives job duration from parent: %d, status %d \n", shmPTR_jobs_buffer[i].task_duration, shmPTR_jobs_buffer[i].task_status);
-            //rewrite for parent
-            shmPTR_jobs_buffer[i].task_duration = -1;
-            shmPTR_jobs_buffer[i].task_status = -1; //from child
-            sem_post(sem_jobs_buffer[i]);
-        }
-        exit(0);
-    }
-    else{
-        for (int i = 0; i<number_of_processes; i++){
-            sem_wait(sem_jobs_buffer[i]);
-            printf("Job %i  cleared by children. Duration: %d, status %d \n", i, shmPTR_jobs_buffer[i].task_duration, shmPTR_jobs_buffer[i].task_status);
-
-        }
-        wait(NULL);
-    }
 
     //detach and remove shared memory locations
     int detach_status = shmdt((void *) ShmPTR_global_data); //detach
@@ -327,4 +317,51 @@ int main(int argc, char* argv[]){
     }
     printf("success\n");
     return 0;
+}
+
+// Real main
+int main(int argc, char* argv[]){
+
+    printf("Lab 1 Starts...\n");
+
+    struct timeval start, end;
+    long secs_used,micros_used;
+
+    //start timer
+    gettimeofday(&start, NULL);
+
+    //Check and parse command line options to be in the right format
+    if (argc < 2) {
+        printf("Usage: sum <infile> <numprocs>\n");
+        exit(EXIT_FAILURE);
+    }
+
+
+    //Limit number_of_processes into 10. 
+    //If there's no third argument, set the default number_of_processes into 1.  
+    if (argc < 3){
+        number_of_processes = 1;
+    }
+    else{
+        if (atoi(argv[2]) < MAX_PROCESS) number_of_processes = atoi(argv[2]);
+        else number_of_processes = MAX_PROCESS;
+    }
+
+    setup();
+    createchildren();
+    main_loop(argv[1]);
+
+    //parent cleanup
+    cleanup();
+
+    //stop timer
+    gettimeofday(&end, NULL);
+
+    double start_usec = (double) start.tv_sec * 1000000 + (double) start.tv_usec;
+    double end_usec =  (double) end.tv_sec * 1000000 + (double) end.tv_usec;
+
+    printf("Your computation has used: %lf secs \n", (end_usec - start_usec)/(double)1000000);
+
+
+    return (EXIT_SUCCESS);
 }
