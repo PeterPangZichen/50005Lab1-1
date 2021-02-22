@@ -212,13 +212,13 @@ void main_loop(char* fileName){
         //      d. Otherwise if process i is prematurely terminated, revive it. You are free to design any mechanism you want. The easiest way is to always spawn a new process using fork(), direct the children to job_dispatch(i) function. Then, update the shmPTR_jobs_buffer[i] for this process. Afterwards, don't forget to do sem_post as well 
         //      e. The outermost while loop will keep doing this until there's no more content in the input file. 
 
-        int alive = waitpid(children_processes[i], NULL, WNOHANG);
         int i = 0;
         //go through all process in buffer
         //should not use "for" since need to wait
         //for(int i=0;i<number_of_processes;i++)
         while(true){
             //check alive
+            int alive = waitpid(children_processes[i], NULL, WNOHANG);
             if (alive == 0){
                 //check free
                 if (shmPTR_jobs_buffer[i].task_status == 0) {
@@ -250,18 +250,17 @@ void main_loop(char* fileName){
 
     // TODO#4: Design a way to send termination jobs to ALL worker that are currently alive 
 
-        for (i=0; i<number_of_processes; i++) {
-            if (shmPTR_jobs_buffer[i].task_status == 1 && shmPTR_jobs_buffer[i].task_type != 'i') {
-                //busy wait
-                while (shmPTR_jobs_buffer[i].task_status == 1);
-            }
-            //job done
-            //send termination signal
-            shmPTR_jobs_buffer[i].task_type = 'z';
-            shmPTR_jobs_buffer[i].task_duration = 0;
-            shmPTR_jobs_buffer[i].task_status = 1;
-            sem_post(sem_jobs_buffer[i]);
+    for (int i=0; i<number_of_processes; i++) {
+        if (shmPTR_jobs_buffer[i].task_status == 1 && shmPTR_jobs_buffer[i].task_type != 'i') {
+            //busy wait
+            while (shmPTR_jobs_buffer[i].task_status == 1);
         }
+        //job done
+        //send termination signal
+        shmPTR_jobs_buffer[i].task_type = 'z';
+        shmPTR_jobs_buffer[i].task_duration = 0;
+        shmPTR_jobs_buffer[i].task_status = 1;
+        sem_post(sem_jobs_buffer[i]);
     }
   
 
@@ -316,8 +315,9 @@ void cleanup(){
         free(sem_name);
     }
     printf("success\n");
-    return 0;
+    return;
 }
+
 
 // Real main
 int main(int argc, char* argv[]){
@@ -337,8 +337,8 @@ int main(int argc, char* argv[]){
     }
 
 
-    //Limit number_of_processes into 10. 
-    //If there's no third argument, set the default number_of_processes into 1.  
+    //Limit number_of_processes into 10.
+    //If there's no third argument, set the default number_of_processes into 1.
     if (argc < 3){
         number_of_processes = 1;
     }
